@@ -12,22 +12,22 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
+from aiohttp import web
 from dotenv import load_dotenv
 
 import database as db
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.getenv("PORT", 8080))
 TASHKENT_TZ = pytz.timezone("Asia/Tashkent")
 
 dp = Dispatcher(storage=MemoryStorage())
 
-# Reja qo'shish holatlari (FSM)
 class PlanState(StatesGroup):
     waiting_for_text = State()
     waiting_for_time = State()
 
-# Asosiy menyu
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📝 Yangi reja qo'shish")],
@@ -195,7 +195,6 @@ async def my_plans(message: types.Message):
 async def settings_menu(message: types.Message):
     await message.answer("Sozlamalar bo'limi:\nVaqt mintaqasi: Asia/Tashkent (GMT+5)\nBaza holati: Supabase Connected ✅")
 
-# Avtomatik eslatma yuboruvchi fon vazifasi
 async def reminder_worker(bot: Bot):
     while True:
         try:
@@ -219,12 +218,31 @@ async def reminder_worker(bot: Bot):
             
         await asyncio.sleep(20)
 
+# Render bepul Web Service uchun salomatlik tekshiruvi (Health-check)
+async def health_check(request):
+    return web.Response(text="TIME NINJA BOT IS RUNNING 24/7! 🥷")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logging.info(f"Health-check server {PORT} portda ishga tushdi.")
+
 async def main() -> None:
     session = AiohttpSession(timeout=30.0)
     bot = Bot(token=BOT_TOKEN, session=session)
+    
+    # 1. Bepul server uchun HTTP serverni ishga tushiramiz
+    await start_web_server()
+    
+    # 2. Eslatma tekshiruvchi fon vazifasini ishga tushiramiz
     asyncio.create_task(reminder_worker(bot))
     
-    # Tarmoq uzilsa qayta ulanish mexanizmi (Auto-reconnect loop)
+    # 3. Telegram polling
     while True:
         try:
             await dp.start_polling(bot, handle_signals=False)
